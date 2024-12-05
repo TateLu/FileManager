@@ -1,16 +1,14 @@
 import sys
 import os
-import json
 import shutil
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTreeView, QFileSystemModel,
     QVBoxLayout, QWidget, QPushButton, QLineEdit, QHBoxLayout,
-    QFileDialog, QMessageBox, QInputDialog, QTableWidget, QTableWidgetItem
+    QFileDialog, QMessageBox, QInputDialog, QTableWidget, QTableWidgetItem, QMenu, QAction
 )
 from PyQt5.QtCore import QDir, Qt
 import subprocess
 
-CONFIG_FILE = "file_manager_config.json"
 
 class FileManager(QMainWindow):
     def __init__(self):
@@ -23,8 +21,6 @@ class FileManager(QMainWindow):
         self.setGeometry(100, 100, 800, 600)
         self.init_ui()
 
-        self.load_config()
-
     def init_ui(self):
         # 左侧目录树
         self.tree_view = QTreeView()
@@ -35,6 +31,8 @@ class FileManager(QMainWindow):
         self.tree_view.setRootIndex(self.file_system_model.index(self.initial_directory))
         self.tree_view.selectionModel().selectionChanged.connect(self.on_directory_selected)
         self.tree_view.doubleClicked.connect(self.on_directory_double_clicked)
+        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
 
         # 文件表格
         self.file_table = QTableWidget()
@@ -49,8 +47,6 @@ class FileManager(QMainWindow):
         button_layout = QHBoxLayout()
         self.create_dir_button = QPushButton("新建目录")
         self.create_dir_button.clicked.connect(self.create_directory)
-        self.add_file_button = QPushButton("添加文件")
-        self.add_file_button.clicked.connect(self.add_file_to_directory)
         self.search_bar = QLineEdit(self)
         self.search_bar.setPlaceholderText("搜索文件")
         self.search_button = QPushButton("搜索")
@@ -59,7 +55,6 @@ class FileManager(QMainWindow):
         self.go_up_button.clicked.connect(self.go_up_directory)
 
         button_layout.addWidget(self.create_dir_button)
-        button_layout.addWidget(self.add_file_button)
         button_layout.addWidget(self.search_bar)
         button_layout.addWidget(self.search_button)
         button_layout.addWidget(self.go_up_button)
@@ -73,19 +68,6 @@ class FileManager(QMainWindow):
         container = QWidget()
         container.setLayout(main_layout)
         self.setCentralWidget(container)
-
-    def load_config(self):
-        """加载配置"""
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                self.config = json.load(f)
-        else:
-            self.config = {}
-
-    def save_config(self):
-        """保存配置"""
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=4)
 
     def on_directory_selected(self, selected):
         """更新当前目录"""
@@ -107,21 +89,6 @@ class FileManager(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"目录创建失败: {str(e)}")
 
-    def add_file_to_directory(self):
-        """添加文件到目录"""
-        file_dialog = QFileDialog(self)
-        file_dialog.setFileMode(QFileDialog.ExistingFiles)
-        if file_dialog.exec_():
-            selected_files = file_dialog.selectedFiles()
-            for file in selected_files:
-                dest_file = os.path.join(self.current_directory, os.path.basename(file))
-                try:
-                    shutil.copy(file, dest_file)
-                    QMessageBox.information(self, "成功", f"文件 {os.path.basename(file)} 添加成功")
-                except Exception as e:
-                    QMessageBox.warning(self, "错误", f"文件添加失败: {str(e)}")
-            self.update_file_list()
-
     def search_files(self):
         """搜索文件"""
         keyword = self.search_bar.text()
@@ -133,7 +100,9 @@ class FileManager(QMainWindow):
         for root, _, files in os.walk(self.current_directory):
             for file in files:
                 if keyword.lower() in file.lower():
-                    results.append((file, os.path.join(root, file)))
+                    file_path = os.path.join(root, file)
+                    if os.path.isfile(file_path):  # 只添加文件
+                        results.append((file, file_path))
         self.display_search_results(results)
 
     def display_search_results(self, results):
@@ -146,14 +115,15 @@ class FileManager(QMainWindow):
             self.file_table.setItem(row, 1, QTableWidgetItem(file_path))
 
     def update_file_list(self):
-        """更新文件列表"""
+        """更新文件列表，过滤掉目录，只展示文件"""
         self.file_table.setRowCount(0)
         for file in os.listdir(self.current_directory):
             file_path = os.path.join(self.current_directory, file)
-            row = self.file_table.rowCount()
-            self.file_table.insertRow(row)
-            self.file_table.setItem(row, 0, QTableWidgetItem(file))
-            self.file_table.setItem(row, 1, QTableWidgetItem(file_path))
+            if os.path.isfile(file_path):  # 只展示文件
+                row = self.file_table.rowCount()
+                self.file_table.insertRow(row)
+                self.file_table.setItem(row, 0, QTableWidgetItem(file))
+                self.file_table.setItem(row, 1, QTableWidgetItem(file_path))
 
     def on_table_item_double_clicked(self, row, column):
         """双击文件表格项时打开文件"""
@@ -189,8 +159,96 @@ class FileManager(QMainWindow):
             self.tree_view.setRootIndex(self.file_system_model.index(self.current_directory))
             self.update_file_list()
 
+    # 右键菜单相关功能
+
+    def show_context_menu(self, position):
+        """右键菜单"""
+        index = self.tree_view.indexAt(position)
+        if not index.isValid():
+            return
+
+        file_path = self.file_system_model.filePath(index)
+        context_menu = QMenu(self)
+
+        if os.path.isdir(file_path):
+            # 添加文件
+            add_file_action = QAction("添加文件", self)
+            add_file_action.triggered.connect(lambda: self.add_file_to_directory(file_path))
+            context_menu.addAction(add_file_action)
+
+            # 新建子目录
+            create_subdir_action = QAction("新建子目录", self)
+            create_subdir_action.triggered.connect(lambda: self.create_sub_directory(file_path))
+            context_menu.addAction(create_subdir_action)
+
+            # 修改目录名称
+            rename_dir_action = QAction("修改目录名称", self)
+            rename_dir_action.triggered.connect(lambda: self.rename_directory(file_path))
+            context_menu.addAction(rename_dir_action)
+
+            # 删除目录
+            delete_dir_action = QAction("删除目录", self)
+            delete_dir_action.triggered.connect(lambda: self.delete_directory(file_path))
+            context_menu.addAction(delete_dir_action)
+
+        context_menu.exec_(self.tree_view.viewport().mapToGlobal(position))
+
+    def add_file_to_directory(self, dir_path):
+        """添加文件到选中的目录"""
+        file_dialog = QFileDialog(self)
+        file_path, _ = file_dialog.getOpenFileName(self, "选择文件")
+        if file_path:
+            try:
+                target_file_path = os.path.join(dir_path, os.path.basename(file_path))
+                shutil.copy(file_path, target_file_path)
+                QMessageBox.information(self, "成功", f"文件已添加到目录 '{os.path.basename(dir_path)}'")
+                self.update_file_list()
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"添加文件失败: {str(e)}")
+
+    def create_sub_directory(self, dir_path):
+        """在选中目录下创建子目录"""
+        new_dir_name, ok = QInputDialog.getText(self, "新建子目录", "请输入子目录名称:")
+        if ok and new_dir_name:
+            new_dir_path = os.path.join(dir_path, new_dir_name)
+            try:
+                os.makedirs(new_dir_path, exist_ok=True)
+                QMessageBox.information(self, "成功", f"子目录 '{new_dir_name}' 创建成功")
+                self.update_file_list()
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"创建子目录失败: {str(e)}")
+
+    def rename_directory(self, dir_path):
+        """修改目录名称"""
+        new_name, ok = QInputDialog.getText(self, "修改目录名称", "请输入新目录名称:")
+        if ok and new_name:
+            try:
+                new_dir_path = os.path.join(os.path.dirname(dir_path), new_name)
+                os.rename(dir_path, new_dir_path)
+                QMessageBox.information(self, "成功", f"目录名称已修改为 '{new_name}'")
+                self.update_file_list()
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"重命名失败: {str(e)}")
+
+    def delete_directory(self, dir_path):
+        """删除选中目录及其所有内容"""
+        reply = QMessageBox.question(
+            self,
+            "删除确认",
+            f"您确定要删除目录 '{os.path.basename(dir_path)}' 及其所有内容吗？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            try:
+                shutil.rmtree(dir_path)
+                QMessageBox.information(self, "成功", f"目录 '{os.path.basename(dir_path)}' 已删除")
+                self.update_file_list()
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"删除失败: {str(e)}")
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = FileManager()
-    window.show()
+    file_manager = FileManager()
+    file_manager.show()
     sys.exit(app.exec_())
