@@ -6,8 +6,9 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QLineEdit, QHBoxLayout,
     QFileDialog, QMessageBox, QInputDialog, QTableWidget, QTableWidgetItem, QMenu, QAction
 )
-from PyQt5.QtCore import QDir, Qt
+from PyQt5.QtCore import QDir, Qt, QDateTime
 import subprocess
+import datetime
 
 
 class FileManager(QMainWindow):
@@ -17,9 +18,26 @@ class FileManager(QMainWindow):
         self.initial_directory = os.getcwd()
         self.current_directory = self.initial_directory
 
+        # 设置到期时间为2024年12月31日
+        self.expiry_date = datetime.date(2024, 12, 30)
+
+        # 检查是否过期
+        if not self.check_expiry():
+            return  # 如果过期，直接退出后续流程
+
         self.setWindowTitle("文件管理器")
         self.setGeometry(100, 100, 800, 600)
         self.init_ui()
+
+    def check_expiry(self):
+        """检查是否超过到期时间，返回True或False"""
+        current_date = datetime.date.today()
+        if current_date > self.expiry_date:
+            # 到期时间已过，弹出警告并退出应用
+            QMessageBox.warning(self, "应用到期", "应用已到期，将关闭应用。")
+            QApplication.quit()
+            return False
+        return True
 
     def init_ui(self):
         # 左侧目录树
@@ -201,13 +219,13 @@ class FileManager(QMainWindow):
             try:
                 target_file_path = os.path.join(dir_path, os.path.basename(file_path))
                 shutil.copy(file_path, target_file_path)
-                QMessageBox.information(self, "成功", f"文件已添加到目录 '{os.path.basename(dir_path)}'")
+                QMessageBox.information(self, "成功", f"文件 '{os.path.basename(file_path)}' 已添加到目录")
                 self.update_file_list()
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"添加文件失败: {str(e)}")
+                QMessageBox.warning(self, "错误", f"文件添加失败: {str(e)}")
 
     def create_sub_directory(self, dir_path):
-        """在选中目录下创建子目录"""
+        """在当前目录下创建子目录"""
         new_dir_name, ok = QInputDialog.getText(self, "新建子目录", "请输入子目录名称:")
         if ok and new_dir_name:
             new_dir_path = os.path.join(dir_path, new_dir_name)
@@ -216,10 +234,10 @@ class FileManager(QMainWindow):
                 QMessageBox.information(self, "成功", f"子目录 '{new_dir_name}' 创建成功")
                 self.update_file_list()
             except Exception as e:
-                QMessageBox.warning(self, "错误", f"创建子目录失败: {str(e)}")
+                QMessageBox.warning(self, "错误", f"子目录创建失败: {str(e)}")
 
     def rename_directory(self, dir_path):
-        """修改目录名称"""
+        """修改选中目录名称"""
         new_name, ok = QInputDialog.getText(self, "修改目录名称", "请输入新目录名称:")
         if ok and new_name:
             try:
@@ -250,5 +268,7 @@ class FileManager(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     file_manager = FileManager()
+    if not file_manager.check_expiry():
+        sys.exit(app.exec_())
     file_manager.show()
     sys.exit(app.exec_())
